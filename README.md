@@ -15,7 +15,7 @@ We decouple diffusion transformer into encoder-decoder design, and surprisingly 
 * As a byproduct, our DDT can reuse encoder among adjacent steps to accelerate inference.
 ## Update 5/6/2025
 * PixelDDT-XXL/16-R1024-T2I achieves **66.7** without prompt rewriting and **71.2** with prompt rewriting on GenEval benchmark
-* Pixel Space Text-to-image models(PixelDDT-XXL/16) will be released soon.
+* Pixel space Text-to-image models(PixelDDT-XXL/16) will be released soon.
 ## Visualizations
 ![](./figs/teaser.png)
 ## Checkpoints
