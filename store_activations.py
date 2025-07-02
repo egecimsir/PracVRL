@@ -56,11 +56,11 @@ class HookedPipeline:
         self._hook_denoiser()
 
         
-    @activations.getter
+    @property
     def activations(self):
         return self._activations
     
-    
+
     def _hook_denoiser(self):
         """
         Registers forward hooks to capture activations of the denoiser layers 
