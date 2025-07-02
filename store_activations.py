@@ -52,22 +52,15 @@ class HookedPipeline:
         self.resolution = resolution
         self.cls2idx = cls2idx
 
-        self._activations = {}
+        self.activations = {}
         self._hook_denoiser()
 
-        
-    @property
-    def activations(self):
-        return self._activations
-    
 
     def _hook_denoiser(self):
         """
         Registers forward hooks to capture activations of the denoiser layers 
         and stores activations in self.activations.
         """
-        self.activations = {}
-
         def fwd_hook(name):
             def hook(layer, input, output):
                 self.activations[name] = output.detach().cpu()
