@@ -7,3 +7,4 @@ torchvision
 timm
 accelerate
 gradio
+omegaconf
