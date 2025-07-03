@@ -8,3 +8,4 @@ timm
 accelerate
 gradio
 omegaconf
+matplotlib
