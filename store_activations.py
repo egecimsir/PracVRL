@@ -82,10 +82,16 @@ def store_activations(
 
     ## Create hook
     activations = {}
+    current_timestep = {'t': None}  # Use dict for mutability in closure
 
     def fwrd_hook(name):
         def hook_fn(layer, input, output):
-            activations[name] = output.detach().cpu()
+            t = current_timestep['t']
+            if t is not None:
+                t_val = float(t[0].item()) if isinstance(t, torch.Tensor) else float(t)
+                if t_val not in activations:
+                    activations[t_val] = {}
+                activations[t_val][name] = output.detach().cpu()
         return hook_fn
 
     ## Register hooks to encoder
@@ -94,6 +100,14 @@ def store_activations(
             if verbose: print(f"Registered hook for: {name}")
             layer.register_forward_hook(fwrd_hook(name))
 
+    # Patch denoiser forward to track timestep
+    orig_forward = denoiser.forward
+    def forward_with_timestep(*args, **kwargs):
+        # Assume timestep is the second argument (after x)
+        t = args[1] if len(args) > 1 else kwargs.get('t', None)
+        current_timestep['t'] = t
+        return orig_forward(*args, **kwargs)
+    denoiser.forward = forward_with_timestep
 
     ## Pass forward through denoiser
     cls_id = label_map[cls_name.lower()]
@@ -106,7 +120,7 @@ def store_activations(
 
     ## Save if specified
     if pkl_save_path is not None:
-        with open(pkl_save_path, "w") as f:
+        with open(pkl_save_path, "wb") as f:
             pickle.dump(activations, f)
 
     if img_save_path is not None:
@@ -118,4 +132,31 @@ def store_activations(
 
     return activations, decoded
 
-        
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Store and print timestep-dependent activations.")
+    parser.add_argument('--config', type=str, required=True, help='Path to config YAML')
+    parser.add_argument('--ckpt', type=str, required=True, help='Path to model checkpoint')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to use (cuda or cpu)')
+    parser.add_argument('--class', dest='cls_name', type=str, required=True, help='Class name (e.g. "goldfish")')
+    parser.add_argument('--out', type=str, default=None, help='Path to save activations (pickle)')
+    parser.add_argument('--img_out', type=str, default=None, help='Directory to save generated image')
+    parser.add_argument('--verbose', action='store_true', help='Verbose output')
+    args = parser.parse_args()
+
+    activations, _ = store_activations(
+        config_path=args.config,
+        ckpt_path=args.ckpt,
+        device=args.device,
+        cls_name=args.cls_name,
+        pkl_save_path=args.out,
+        img_save_path=args.img_out,
+        verbose=args.verbose
+    )
+
+    print(f"Stored activations for {len(activations)} timesteps.")
+    for t, layers in sorted(activations.items()):
+        print(f"Timestep {t:.5f}: {list(layers.keys())}")
+
