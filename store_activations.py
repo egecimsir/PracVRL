@@ -56,11 +56,16 @@ def store_activations(
         verbose=False,
     ) -> dict:
 
+    ## Initialise models
     vae, denoiser, conditioner = initialise_models(
         config_path=config_path, 
         ckpt_path=ckpt_path, 
         device=device
     )
+
+    # Use multiple GPUs if available
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        denoiser = torch.nn.DataParallel(denoiser)
 
     sampler = EulerSampler(
         scheduler=LinearScheduler(),
