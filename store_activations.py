@@ -1,7 +1,8 @@
 import os
 import pickle
-import numpy as np
+import argparse
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -100,10 +101,10 @@ def store_activations(
             if verbose: print(f"Registered hook for: {name}")
             layer.register_forward_hook(fwrd_hook(name))
 
-    # Patch denoiser forward to track timestep
+    ## Adjust denoiser.forward() to track timestep
     orig_forward = denoiser.forward
     def forward_with_timestep(*args, **kwargs):
-        # Assume timestep is the second argument (after x)
+        ## Capture time argument (t)
         t = args[1] if len(args) > 1 else kwargs.get('t', None)
         current_timestep['t'] = t
         return orig_forward(*args, **kwargs)
@@ -134,8 +135,24 @@ def store_activations(
 
 
 
+def get_encoder_activations(activations: dict, conf_path: str):
+    l0: int = len(activations)
+    n_encoders: int = OmegaConf.load(conf_path).model.denoiser.init_args.num_encoder_blocks
+    
+    activations = {int(float(f"{k:.3f}")*1000): v for k, v in activations.items()}
+    assert l0 == len(activations)
+
+    encoder_activations = {}
+    for t, t_act in activations.items():
+        encoder_activations[t] = {name: act for name, act in t_act.items() if f"{n_encoders}." in name}
+
+    assert l0 == len(encoder_activations)
+    
+    return encoder_activations
+
+
+
 if __name__ == "__main__":
-    import argparse
     parser = argparse.ArgumentParser(description="Store and print timestep-dependent activations.")
     parser.add_argument('--config', type=str, required=True, help='Path to config YAML')
     parser.add_argument('--ckpt', type=str, required=True, help='Path to model checkpoint')
