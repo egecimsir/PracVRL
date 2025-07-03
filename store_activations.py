@@ -38,7 +38,6 @@ def initialise_models(config_path: str, ckpt_path: str, device: str):
     return vae, denoiser, conditioner
 
 
-
 def store_activations(
         config_path: str,
         ckpt_path: str,
@@ -134,10 +133,9 @@ def store_activations(
     return activations, decoded
 
 
-
-def get_encoder_activations(activations: dict, conf_path: str):
+def get_encoder_activations(activations: dict, config_path: str):
     l0: int = len(activations)
-    n_encoders: int = OmegaConf.load(conf_path).model.denoiser.init_args.num_encoder_blocks
+    n_encoders: int = OmegaConf.load(config_path).model.denoiser.init_args.num_encoder_blocks
     
     activations = {int(float(f"{k:.3f}")*1000): v for k, v in activations.items()}
     assert l0 == len(activations)
@@ -172,7 +170,8 @@ if __name__ == "__main__":
         img_save_path=args.img_out,
         verbose=args.verbose
     )
-
+    
+    ## TODO: Logging instead printing
     print(f"Stored activations for {len(activations)} timesteps.")
     for t, layers in sorted(activations.items()):
         print(f"Timestep {t:.5f}: {list(layers.keys())}")

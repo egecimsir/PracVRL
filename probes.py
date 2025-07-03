@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 
 
+## TODO
 class LinearProbe(nn.Module):
     def __init__(self, in_dim: int, n_classes: int):
         super(LinearProbe, self).__init__()
@@ -12,3 +13,9 @@ class LinearProbe(nn.Module):
 
     def forward(self, x):
         return self.layers(x)
+
+
+## TODO
+class DepthEstimator(nn.Module):
+    pass
+
