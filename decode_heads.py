@@ -16,10 +16,5 @@ class LinearClassifier(nn.Module):
 
 
 ## TODO
-class DepthEstimator(nn.Module):
-    pass
-
-
-## TODO
-class FeatureAligner:
+class Segmenter(nn.Module):
     pass

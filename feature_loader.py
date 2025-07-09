@@ -10,9 +10,7 @@ from utils import parse_class_labels
 class TimeStepData(Dataset):
     def __init__(self, activations: dict, label_file: str):
         super(TimeStepData, self).__init__()
-        self.label_map = parse_class_labels(filename=label_file)
-        self.labels = list(self.label_map.keys())
-        self.targets = list(self.label_map.items())
+        pass
 
     def __len__(self):
         pass

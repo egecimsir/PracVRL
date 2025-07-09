@@ -6,6 +6,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from datasets import load_dataset
+from torch.utils.data import IterableDataset
+from torchvision.transforms import transforms as T
+
+from huggingface_hub import login
 from omegaconf import OmegaConf
 from PIL import Image
 
@@ -15,7 +20,46 @@ from src.diffusion.stateful_flow_matching.scheduling import LinearScheduler
 from src.diffusion.stateful_flow_matching.sampling import EulerSampler
 
 
-label_map: dict = parse_class_labels()
+
+class ImageNet1K(IterableDataset):
+    def __init__(self, split: str = "train", normalize=True):
+        login(token=os.getenv("HF_TOKEN"))
+        dataset = load_dataset("imagenet-1k", split=split, token=True, streaming=True)
+        trafos = [
+            T.Resize(256), T.CenterCrop(224),
+            T.ToTensor(),
+        ]
+        if normalize:
+          trafos.append(T.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225]))
+        
+        self.split = split
+        self.dataset = dataset.shuffle(buffer_size=1000).map(self.preprocess, batched=True, batch_size=32)
+        self.transform = T.Compose(trafos)
+        
+        self._label_map = parse_class_labels()
+        self._idx2label = {v:k for k,v in self.label_map.items()}
+
+    @property
+    def label_map(self) -> dict:
+        return self._label_map
+    
+    @property
+    def idx2label(self) -> dict:
+        return self._idx2label
+
+    def __iter__(self):
+        for item in self.dataset:
+            yield item["imgs"], item["label"]
+
+    def __len__(self):
+        if self.split == "train":
+          return 1281167
+        else:
+          return 1
+    
+    def preprocess(self, batch):
+        batch["imgs"] = [self.transform(img.convert("RGB")) for img in batch["image"]]
+        return batch
 
 
 def instantiate_from_config(config):
