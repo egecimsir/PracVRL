@@ -19,6 +19,7 @@ from src.diffusion.base.guidance import simple_guidance_fn
 from src.diffusion.stateful_flow_matching.scheduling import LinearScheduler
 from src.diffusion.stateful_flow_matching.sampling import EulerSampler
 
+label_map = parse_class_labels()
 
 
 class ImageNet1K(IterableDataset):
