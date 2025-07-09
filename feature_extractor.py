@@ -19,16 +19,17 @@ from src.diffusion.base.guidance import simple_guidance_fn
 from src.diffusion.stateful_flow_matching.scheduling import LinearScheduler
 from src.diffusion.stateful_flow_matching.sampling import EulerSampler
 
-label_map = parse_class_labels()
 
 
 class ImageNet1K(IterableDataset):
+    
+    label_map = parse_class_labels()
     split_lens = {
         "train": 1_281_167,
         "validation": 50_000,
         "test": 100_000
     }
-
+    
     def __init__(self, split: str = "train", normalize=True):
         login(token=os.getenv("HF_TOKEN"))
         dataset = load_dataset("imagenet-1k", split=split, token=True, streaming=True)
@@ -43,7 +44,7 @@ class ImageNet1K(IterableDataset):
         self.transform = T.Compose(trafos)
         
         self.split = split
-        self.label_map = parse_class_labels()
+        self.label_map = ImageNet1K.label_map
         self.idx2label = {v:k for k,v in self.label_map.items()}
 
 
