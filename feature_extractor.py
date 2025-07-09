@@ -42,8 +42,8 @@ class ImageNet1K(IterableDataset):
         self.transform = T.Compose(trafos)
         
         self.split = split
-        self._label_map = parse_class_labels()
-        self._idx2label = {v:k for k,v in self.label_map.items()}
+        self.label_map = parse_class_labels()
+        self.idx2label = {v:k for k,v in self.label_map.items()}
 
 
     def __iter__(self):
