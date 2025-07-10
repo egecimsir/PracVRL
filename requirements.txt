@@ -11,3 +11,4 @@ omegaconf
 matplotlib
 datasets
 huggingface_hub
+scikit-learn
