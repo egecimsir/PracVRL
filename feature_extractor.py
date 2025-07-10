@@ -14,10 +14,12 @@ from huggingface_hub import login
 from omegaconf import OmegaConf
 from PIL import Image
 
-from utils import load_weights, tensor_to_image, parse_class_labels
 from src.diffusion.base.guidance import simple_guidance_fn
 from src.diffusion.stateful_flow_matching.scheduling import LinearScheduler
 from src.diffusion.stateful_flow_matching.sampling import EulerSampler
+from src.lightning_model import LightningModel as MyLightningModel
+
+from utils import load_weights, tensor_to_image, parse_class_labels
 
 
 
@@ -31,7 +33,7 @@ class ImageNet1K(IterableDataset):
     }
     
     def __init__(self, split: str = "train", normalize=True):
-        login(token=os.getenv("HF_TOKEN"))
+        #login(token=os.getenv("HF_TOKEN"))
         dataset = load_dataset("imagenet-1k", split=split, token=True, streaming=True)
         trafos = [
             T.Resize(256), T.CenterCrop(224),
@@ -69,11 +71,12 @@ def instantiate_from_config(config):
     return getattr(module, class_name)(**config.get("init_args", {}))
 
 
-def initialise_models(config_path: str, ckpt_path: str, device: str):
+def initialize_models(config_path: str, ckpt_path: str, device: str):
     cfg = OmegaConf.load(config_path)
     vae = instantiate_from_config(cfg.model.vae)
     denoiser = instantiate_from_config(cfg.model.denoiser)
     conditioner = instantiate_from_config(cfg.model.conditioner)
+    diff_trainer = instantiate_from_config(cfg.model.diffusion_trainer.init_args.)
 
     # Load weights
     ckpt = torch.load(ckpt_path)
@@ -102,7 +105,7 @@ def store_activations(
     ) -> dict:
 
     ## Initialise models
-    vae, denoiser, conditioner = initialise_models(
+    vae, denoiser, conditioner = initialize_models(
         config_path=config_path, 
         ckpt_path=ckpt_path, 
         device=device
@@ -195,17 +198,91 @@ def get_encoder_activations(activations: dict, config_path: str):
 
 
 
+def main(
+        config_path: str,
+        ckpt_path: str,
+        device: str,
+        cls_name: str,
+        split: str = "train",
+        pkl_save_path: str = None,
+        img_save_path: str = None,
+        resolution: int = 256, 
+        num_steps = 100,
+        guidance = 8.5,
+        guidance_min = 0.02, 
+        guidance_max = 0.98,
+        last_step = 0.005, 
+        timeshift = 0.9,
+        img_seed=1234,
+        verbose=False,
+    ):
+ 
+    ## Initialize models
+    vae, denoiser, conditioner = initialize_models(
+        config_path=config_path, 
+        ckpt_path=ckpt_path, 
+        device=device
+    )
+
+    ## Use multiple GPUs if available
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        denoiser = torch.nn.DataParallel(denoiser)
+
+    sampler = EulerSampler(
+        scheduler=LinearScheduler(),
+        w_scheduler=LinearScheduler(),
+        guidance_fn=simple_guidance_fn,
+        num_steps=num_steps,
+        guidance=guidance,
+        state_refresh_rate=1,
+        guidance_interval_min=guidance_min,
+        guidance_interval_max=guidance_max,
+        timeshift=timeshift,
+        last_step=last_step
+    )
+
+    ## TODO: Get trainer, instantiate model
+    model = MyLightningModel.load_from_checkpoint(
+        "model.ckpt", 
+        map_location="cpu",
+        strict=False,
+        vae=vae, conditioner=conditioner, denoiser=denoiser, diffusion_trainer=trainer, diffusion_sampler=sampler)
+
+    
+    ## TODO?: Create hook
+    activations = {}
+    def fwrd_hook(name):
+        def hook_fn(layer, input, output):
+            t = current_timestep['t']
+            if t is not None:
+                t_val = float(t[0].item()) if isinstance(t, torch.Tensor) else float(t)
+                if t_val not in activations:
+                    activations[t_val] = {}
+                activations[t_val][name] = output.detach().cpu()
+        return hook_fn
+
+    ## Register hooks to encoder
+    for name, layer in denoiser.blocks.named_modules():
+        if name.count(".") == 1:
+            if verbose: print(f"Registered hook for: {name}")
+            layer.register_forward_hook(fwrd_hook(name))
+
+    pass
+
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Store and print timestep-dependent activations.")
-    parser.add_argument('--config', type=str, required=True, help='Path to config YAML')
-    parser.add_argument('--ckpt', type=str, required=True, help='Path to model checkpoint')
+    parser.add_argument('--config', type=str, default="configs/repa_improved_ddt_xlen22de6_256.yaml")
+    parser.add_argument('--ckpt', type=str, default="model.ckpt", help='Path to model checkpoint')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (cuda or cpu)')
     parser.add_argument('--class', dest='cls_name', type=str, required=True, help='Class name (e.g. "goldfish")')
     parser.add_argument('--out', type=str, default=None, help='Path to save activations (pickle)')
-    parser.add_argument('--img_out', type=str, default=None, help='Directory to save generated image')
+    parser.add_argument('--img_out', type=str, default="imagenet256_features", help='Output directory')
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
     args = parser.parse_args()
 
+    print(args.config)
 
     activations, _ = store_activations(
         config_path=args.config,
@@ -217,7 +294,11 @@ if __name__ == "__main__":
         verbose=args.verbose
     )
     
+    ## TODO: Extract features from ImageNet (with timesteps)
+    ## TODO: Save in suitable format
+    ## TODO: Adjust for given timesteps ?
     ## TODO: Logging instead printing
+
     print(f"Stored activations for {len(activations)} timesteps.")
     for t, layers in sorted(activations.items()):
         print(f"Timestep {t:.5f}: {list(layers.keys())}")

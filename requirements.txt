@@ -10,3 +10,4 @@ gradio
 omegaconf
 matplotlib
 datasets
+huggingface_hub
