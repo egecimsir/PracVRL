@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
+from src.lightning_model import LightningModel
 from src.diffusion.stateful_flow_matching.scheduling import LinearScheduler
 from imagenet import ImageNet1K
 from utils import load_weights
@@ -18,7 +19,7 @@ def instantiate_from_config(config):
     return getattr(module, class_name)(**config.get("init_args", {}))
 
 
-def initialize_models(config_path: str, ckpt_path: str, device: str):
+def initialize_models(config_path: str, ckpt_path: str, device: str, lighning=True):
     cfg = OmegaConf.load(config_path)
 
     vae = instantiate_from_config(cfg["model"]["vae"])
@@ -38,7 +39,6 @@ def initialize_models(config_path: str, ckpt_path: str, device: str):
         "class_path": sched_path,
         "init_args": {}
     })
-
     # Set up trainer with scheduler
     trainer_cfg = {
         "class_path": cfg["model"]["diffusion_trainer"]["class_path"],
@@ -53,6 +53,18 @@ def initialize_models(config_path: str, ckpt_path: str, device: str):
     }
     sampler = instantiate_from_config(sampler_cfg)
 
+    if lighning:
+        model = LightningModel.load_from_checkpoint(
+            vae=vae,
+            conditioner=conditioner,
+            denoiser=denoiser,
+            diffusion_trainer=diff_trainer,
+            diffusion_sampler=sampler,
+            strict=False
+        )
+        return model, scheduler
+    
+    
     return vae, denoiser, conditioner, diff_trainer, sampler, scheduler
 
 
@@ -151,12 +163,14 @@ if __name__ == "__main__":
 
     try:
         ## Initialize models with hooks
-        vae, denoiser, conditioner, diff_trainer, sampler, scheduler = initialize_models(
+        
+        model, scheduler = initialize_models(
             config_path=CONFIG,
             ckpt_path=CKPT,
-            device=device
+            device=device,
+            lighning=True
         )
-        register_encoder_hook(activations, denoiser, trgt_layer=NUM_ENC)
+        register_encoder_hook(activations, model.denoiser, trgt_layer=NUM_ENC)
 
         ## Load ImageNet
         dataset = ImageNet1K(split="validation")
@@ -169,8 +183,8 @@ if __name__ == "__main__":
 
         ## Extract time dependent features to activations
         extract_features(
-            vae=vae,
-            ddt=denoiser,
+            vae=model.vae,
+            ddt=model.denoiser,
             scheduler=scheduler,
             time_steps=[0.95],
             loader=dataloader,
