@@ -146,31 +146,20 @@ def extract_features(
                 break
 
 
-
-if __name__ == "__main__":
-
-    CONFIG = "configs/repa_improved_ddt_xlen22de6_256.yaml"
-    CKPT = "model.ckpt"
-    NUM_ENC = OmegaConf.load(CONFIG)["model"]["denoiser"]["init_args"]["num_encoder_blocks"]
-
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {device.upper()}")
+def main(config_path: str, ckpt_path: str, device: str):
+    
+    num_enc = OmegaConf.load(CONFIG)["model"]["denoiser"]["init_args"]["num_encoder_blocks"]
 
     activations = {}
-
     try:
         ## Initialize models with hooks
-        
         model, scheduler = initialize_models(
             config_path=CONFIG,
             ckpt_path=CKPT,
             device=device,
             lighning=True
         )
-        register_encoder_hook(activations, model.denoiser, trgt_layer=NUM_ENC)
+        register_encoder_hook(activations, model.denoiser, trgt_layer=num_enc)
 
         ## Load ImageNet
         dataset = ImageNet1K(split="validation")
@@ -208,3 +197,19 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
 
+    return activations
+
+
+
+if __name__ == "__main__":
+
+    CONFIG = "configs/repa_improved_ddt_xlen22de6_256.yaml"
+    CKPT = "model.ckpt"
+
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Device: {device.upper()}")
+
+    main(CONFIG, CKPT, device)
