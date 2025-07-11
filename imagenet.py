@@ -26,8 +26,7 @@ class ImageNet1K(IterableDataset):
         "test": 100_000
     }
 
-    def __init__(self, split: str = "validation", normalize=True, transform=None):
-        token = get_token()
+    def __init__(self, token: str, split: str = "validation", normalize=True, transform=None):
         try:
             ## Dataset from HF
             print("Trying to access dataset on HF...\n")
