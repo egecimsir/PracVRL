@@ -27,7 +27,11 @@ def initialize_models(config_path: str, ckpt_path: str, device: str, lighning=Tr
     conditioner = instantiate_from_config(cfg["model"]["conditioner"])
 
     # Load weights
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
+    if device == "cpu":
+        ckpt = torch.load(ckpt_path)
+    else:
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
+        
     denoiser = load_weights(denoiser, ckpt).to(device).eval()
     vae = vae.to(device).eval()
 
