@@ -43,7 +43,7 @@ class ImageNet1K(IterableDataset):
             )
         
         ## Transformations
-        trafos = [T.ToTensor()]
+        trafos = [T.Resize((256, 256)), T.ToTensor()]
         if normalize: trafos.append(T.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225]))  
         if transform is not None: trafos.append(list(transform.transforms))
         self.transform = T.Compose(trafos)

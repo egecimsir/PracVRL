@@ -7,10 +7,33 @@ from torch.utils.data import DataLoader
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from src.lightning_model import LightningModel
+from src.models.vae import BaseVAE, fp2uint8
+from src.models.conditioner import BaseConditioner
+from src.utils.model_loader import ModelLoader
+from src.callbacks.simple_ema import SimpleEMA
+from src.diffusion.base.sampling import BaseSampler
+from src.diffusion.base.training import BaseTrainer
 from src.diffusion.stateful_flow_matching.scheduling import LinearScheduler
+
+from src.lightning_model import LightningModel
 from imagenet import ImageNet1K
 from utils import load_weights
+
+
+class Model:
+    def __init__(
+            self,
+            vae: BaseVAE,
+            conditioner: BaseConditioner,
+            denoiser: nn.Module,
+            diffusion_trainer: BaseTrainer,
+            diffusion_sampler: BaseSampler,
+    ):
+        self.vae = vae
+        self.conditioner = conditioner
+        self.denoiser = denoiser
+        self.diffusion_trainer = diffusion_trainer
+        self.diffusion_sampler = diffusion_sampler
 
 
 def instantiate_from_config(config):
@@ -27,11 +50,11 @@ def initialize_models(config_path: str, ckpt_path: str, device: str, lighning=Tr
     conditioner = instantiate_from_config(cfg["model"]["conditioner"])
 
     # Load weights
-    if device == "cpu":
+    if device == "cuda":
         ckpt = torch.load(ckpt_path)
     else:
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
-        
+
     denoiser = load_weights(denoiser, ckpt).to(device).eval()
     vae = vae.to(device).eval()
 
@@ -59,6 +82,7 @@ def initialize_models(config_path: str, ckpt_path: str, device: str, lighning=Tr
 
     if lighning:
         model = LightningModel.load_from_checkpoint(
+            checkpoint_path="model.ckpt",
             vae=vae,
             conditioner=conditioner,
             denoiser=denoiser,
@@ -68,8 +92,7 @@ def initialize_models(config_path: str, ckpt_path: str, device: str, lighning=Tr
         )
         return model, scheduler
     
-    
-    return vae, denoiser, conditioner, diff_trainer, sampler, scheduler
+    return Model(vae, conditioner, denoiser, diff_trainer, sampler), scheduler
 
 
 def register_encoder_hook(activations: dict, model: nn.Module, trgt_layer: int):
@@ -126,10 +149,9 @@ def extract_features(
     ddt = ddt.eval().to(device)
 
     ## Extraction loop
-    
-    for t in time_steps:
+    for t_step in time_steps:
         with torch.no_grad():
-            for i, (img_b, y_b) in enumerate(tqdm(loader, desc="Extracting Features", total=n_batches)):
+            for i, (img_b, y_b) in enumerate(tqdm(loader, desc="Extracting Features: ", total=n_batches)):
                 img_b, y_b = img_b.to(device), y_b.to(device)
 
                 z_raw = vae.encode(img_b)
@@ -138,40 +160,43 @@ def extract_features(
                 noise = torch.rand_like(z)
                 uncond = torch.full_like(y_b, n_classes)
 
-                t = torch.full((z.shape[0],), t, device=device).to(device)
-                a_t = scheduler.alpha(torch.tensor([t])).view(-1,1,1,1)
-                s_t = scheduler.sigma(torch.tensor([t])).view(-1,1,1,1)
+                t = torch.full((z.shape[0],), t_step, device=device).to(device)
+                a_t = scheduler.alpha(torch.tensor([t_step])).view(-1,1,1,1).to(device)
+                s_t = scheduler.sigma(torch.tensor([t_step])).view(-1,1,1,1).to(device)
                 z_t = a_t * z + s_t * noise
-                    
+                
+                # No need to reshape - keep the 4D format (B, C, H, W)
                 out = ddt(z_t, t, uncond)
-            
+
             if one_batch:
                 ## Test run
                 break
 
 
-def main(config_path: str, ckpt_path: str, device: str):
+def main(config_path: str, ckpt_path: str, device: str, hf_token: str, lightning=False):
     
-    num_enc = OmegaConf.load(CONFIG)["model"]["denoiser"]["init_args"]["num_encoder_blocks"]
+    num_enc = OmegaConf.load(config_path)["model"]["denoiser"]["init_args"]["num_encoder_blocks"]
+    print(f"Number of encoder blocks: {num_enc}")
 
     activations = {}
     try:
         ## Initialize models with hooks
         model, scheduler = initialize_models(
-            config_path=CONFIG,
-            ckpt_path=CKPT,
+            config_path=config_path,
+            ckpt_path=ckpt_path,
             device=device,
-            lighning=True
+            lighning=lightning
         )
         register_encoder_hook(activations, model.denoiser, trgt_layer=num_enc)
 
         ## Load ImageNet
-        dataset = ImageNet1K(split="validation")
+        os.environ["HF_TOKEN"] = hf_token  # Set token in environment
+        dataset = ImageNet1K(split="validation", token=hf_token)
         dataloader = DataLoader(
             dataset, 
-            batch_size=32,
+            batch_size=8,
             num_workers=0,  ## Disable multiprocessing for CPU
-            pin_memory=True if device == "cuda" else False
+            pin_memory=device == "cuda"
         )
 
         ## Extract time dependent features to activations
@@ -191,8 +216,9 @@ def main(config_path: str, ckpt_path: str, device: str):
         del dataset
         torch.cuda.empty_cache()
     
-    except Exception as e:
-        print(f"Error: {str(e)}\n")
+    
+    ##except Exception as e:
+    ##    print(f"Error: {str(e)}\n")
     
     ## Cleanup
     finally:
@@ -200,6 +226,7 @@ def main(config_path: str, ckpt_path: str, device: str):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
+    
 
     return activations
 
@@ -207,8 +234,12 @@ def main(config_path: str, ckpt_path: str, device: str):
 
 if __name__ == "__main__":
 
-    CONFIG = "configs/repa_improved_ddt_xlen22de6_256.yaml"
-    CKPT = "model.ckpt"
+    config_path = "configs/repa_improved_ddt_xlen22de6_256.yaml"
+    ckpt_path = "model.ckpt"
+    hf_token = os.getenv("HF_TOKEN")  # Get token from environment variable
+    
+    if not hf_token:
+        raise ValueError("Please set HF_TOKEN environment variable")
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -216,4 +247,11 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device.upper()}")
 
-    main(CONFIG, CKPT, device)
+    activations = main(
+        config_path=config_path,
+        ckpt_path=ckpt_path,
+        device=device,
+        hf_token=hf_token,
+        lightning=False  # Use custom model instead of Lightning
+    )
+    print(f"Collected activations for {len(activations)} timesteps")
