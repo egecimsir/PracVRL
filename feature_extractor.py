@@ -84,7 +84,8 @@ class DDTWrapper:
             "init_args": {**cfg["model"]["diffusion_sampler"]["init_args"], "scheduler": self.scheduler}
         }
         self.sampler = instantiate_from_config(sampler_cfg)
-        print(f"Number of encoder blocks: {model.num_encoder_blocks}")
+        
+        print(f"Number of encoder blocks: {self.num_encoder_blocks}")
         print("\nCompleted!\n---------------\n")
         
 
