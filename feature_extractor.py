@@ -27,6 +27,9 @@ def instantiate_from_config(config):
 
 
 class DDTWrapper:
+    """
+    Instantializes DDT Model with all dependencies.
+    """
     def __init__(
         self, 
         config_path: str = "configs/repa_improved_ddt_xlen22de6_256.yaml", 
@@ -48,7 +51,6 @@ class DDTWrapper:
         ## Initialization
         self.num_encoder_blocks = self.config["model"]["denoiser"]["init_args"]["num_encoder_blocks"]
         self.initialize_models(self.config, ckpt_path)
-
 
     def initialize_models(self, cfg: OmegaConf, ckpt_path: str):
         print("\n---------------\nInitializing ddt, vae, conditioner")
@@ -84,11 +86,10 @@ class DDTWrapper:
             "init_args": {**cfg["model"]["diffusion_sampler"]["init_args"], "scheduler": self.scheduler}
         }
         self.sampler = instantiate_from_config(sampler_cfg)
-        
+
         print(f"Number of encoder blocks: {self.num_encoder_blocks}")
         print("\nCompleted!\n---------------\n")
         
-
     def register_encoder_hook(self, activations: list):
         assert len(activations) == 0, "Input list must be empty!\n"
 
@@ -100,7 +101,25 @@ class DDTWrapper:
             if n == str(self.num_encoder_blocks-1):
                 block.register_forward_hook(hook_fn)
                 print(f"Hook registered for layer: ddt.blocks.{n}")
-        
+
+    def to(self, dev: str):
+        self.device = dev
+        self.ddt.to(dev)
+        self.vae.to(dev)
+        self.sampler.to(dev)
+        self.diff_trainer.to(dev)
+
+    def to_eval(self):
+        self.ddt.eval()
+        self.vae.eval()
+        self.sampler.eval()
+        self.diff_trainer.eval()
+
+    def to_train(self):
+        self.ddt.train()
+        self.vae.train()
+        self.sampler.train()
+        self.diff_trainer.train()
 
 
 def extract_features(
