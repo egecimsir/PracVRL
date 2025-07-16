@@ -94,7 +94,7 @@ class DDTWrapper:
         assert len(activations) == 0, "Input list must be empty!\n"
 
         def hook_fn(layer: DDTBlock, input: Tensor, output: Tensor):
-            activations.append(output.detach().cpu().clone())    
+            activations.append(output.detach().cpu())    
         
         ## Register hooks to target layer
         for n, block in self.ddt.blocks.named_children():  ## 0-27
@@ -161,20 +161,20 @@ def extract_features(
 
 
 if __name__ == "__main__":
-
     CONF_PATH = "configs/repa_improved_ddt_xlen22de6_256.yaml"
     CKPT_PATH = "model.ckpt"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device {device.upper()}")
 
-    
-    activations = []
-
+    ## Initialize DDT
     model = DDTWrapper(
         config_path=CONF_PATH,
         ckpt_path=CKPT_PATH,
         device=device
     )
+
+    ## Register hook on encoder output
+    activations = []
     model.register_encoder_hook(activations)
     
 
