@@ -32,13 +32,15 @@ class DDTWrapper:
     """
     def __init__(
         self, 
-        config_path: str = "configs/repa_improved_ddt_xlen22de6_256.yaml", 
+        config_path: str = "configs/segmentation_256_config.yaml", 
         ckpt_path: str = "model.ckpt", 
-        device: str = "cpu"
+        device: str = "cpu",
+        n_classes: int = 35
     ):
         self.config = OmegaConf.load(config_path)
         self.ckpt_path = ckpt_path
         self.device = device
+        self.n_classes = n_classes
 
         ## Models
         self.vae: BaseVAE = None
@@ -161,7 +163,7 @@ def extract_features(
 
 
 if __name__ == "__main__":
-    CONF_PATH = "configs/repa_improved_ddt_xlen22de6_256.yaml"
+    CONF_PATH = "configs/segmentation_256_config.yaml"
     CKPT_PATH = "model.ckpt"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device {device.upper()}")
