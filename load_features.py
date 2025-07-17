@@ -1,16 +1,33 @@
 import os
 import pickle
+
 import torch
 import torchvision.transforms as T
 import matplotlib.pyplot as plt
 
+from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.datasets import Cityscapes
 from extract_features import SegImagesWithLabels
+from PIL import Image
 
 
 FEAT_ROOT = "cityscapes_features"
 TRGT_ROOT = "cityscapes"
+
+
+def get_label_id(y_map: Tensor):
+    y_map = y_map.long().squeeze(0)
+        
+    mask = (y_map != 255)
+    if mask.sum() == 0:
+        return torch.full((1000,), 0, dtype=torch.long)  # fallback to class 0 if all unlabeled
+        
+    ids, counts = torch.unique(y_map[mask], return_counts=True)
+    label_id = int(ids[counts.argmax()])
+
+    return label_id
+
 
 
 class FeatureSegmentationDataset(Dataset):
@@ -33,7 +50,8 @@ class FeatureSegmentationDataset(Dataset):
         self.split = split
         self.trgt_type = trgt_type
         self.transform = transform if transform else T.Lambda(lambda x: x)
-        if trgt_transform is None:
+        
+        if trgt_transform is not None:
             self.trgt_transform = trgt_transform
         else:
             self.trgt_transform = T.Compose([
@@ -47,7 +65,7 @@ class FeatureSegmentationDataset(Dataset):
         self.feature_files = sorted([
             os.path.join(self.features_dir, f) for f in os.listdir(self.features_dir) if f.endswith(".pt")
         ])
-        
+
         ## Features
         loaded_features = []
         for fp in self.feature_files:
@@ -56,13 +74,14 @@ class FeatureSegmentationDataset(Dataset):
                 loaded_features.extend(data)
             else:
                 loaded_features.append(data)
+        
         features = torch.cat(loaded_features, dim=0)
         self.features = [feat.unsqueeze(0) for feat in features]
 
         ## Targets, Labels
         cityscapes = SegImagesWithLabels(split=split, trgt_type=trgt_type)
         self.targets = [self.trgt_transform(cityscapes.dataset[i][-1]) for i in range(len(self))]
-        self.label_ids = cityscapes.get_all_cls_ids()
+        self.label_ids = [get_label_id(self.targets[i]) for i in range(len(self))]
 
         del features, loaded_features, cityscapes
 
@@ -70,10 +89,12 @@ class FeatureSegmentationDataset(Dataset):
         return len(self.features)
 
     def __getitem__(self, idx):
-        feat, y_id, y_map = self.features[idx], self.label_ids[idx], self.targets[idx]
-        return self.transform(feat), (y_id, y_map)
+        feat = self.transform(self.features[idx])
+        y_map = self.targets[idx]
+        y_id = self.label_ids[idx]
+        
+        return feat, (y_id, y_map)
     
-
 
 if __name__ == "__main__":
     """
@@ -105,18 +126,13 @@ if __name__ == "__main__":
         cityscapes_root="cityscapes"
     )
 
-    plt.figure()
-    plt.imshow(y.permute(1, 2, 0).numpy())
-    plt.axis("off")
-    plt.show()
-
-    features = dataset.features
-    ## TODO: ...
-    
+    # Stack features and flatten for TSNE
+    features_tensor = torch.cat(dataset.features, dim=0)  # shape: (N, ...)
+    features_flat = features_tensor.view(features_tensor.size(0), -1).numpy()
+    label_ids = dataset.label_ids
 
     ## ----
     tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    reduced = tsne.fit_transform(features)
-
+    reduced = tsne.fit_transform(features_flat)
 
     print("Done!")
