@@ -33,13 +33,21 @@ class FeatureSegmentationDataset(Dataset):
         self.split = split
         self.trgt_type = trgt_type
         self.transform = transform if transform else T.Lambda(lambda x: x)
-        self.trgt_transform = trgt_transform if trgt_transform else T.ToTensor()
+        if trgt_transform is None:
+            self.trgt_transform = trgt_transform
+        else:
+            self.trgt_transform = T.Compose([
+                T.Resize(256),
+                T.CenterCrop(224),
+                T.ToTensor()
+            ])
         
         ## Build directory path for features
         self.features_dir = os.path.join(features_root, split, f"timestep_{int(timestep * 100)}")
         self.feature_files = sorted([
             os.path.join(self.features_dir, f) for f in os.listdir(self.features_dir) if f.endswith(".pt")
         ])
+        
         ## Features
         loaded_features = []
         for fp in self.feature_files:
@@ -48,16 +56,13 @@ class FeatureSegmentationDataset(Dataset):
                 loaded_features.extend(data)
             else:
                 loaded_features.append(data)
-
         features = torch.cat(loaded_features, dim=0)
         self.features = [feat.unsqueeze(0) for feat in features]
 
-        ## Targets
+        ## Targets, Labels
         cityscapes = SegImagesWithLabels(split=split, trgt_type=trgt_type)
         self.targets = [self.trgt_transform(cityscapes.dataset[i][-1]) for i in range(len(self))]
-        
-        ## Labels
-        self.label_ids = [cityscapes.get_label_id(y_map) for y_map in self.targets]
+        self.label_ids = cityscapes.get_all_cls_ids()
 
         del features, loaded_features, cityscapes
 
@@ -100,9 +105,6 @@ if __name__ == "__main__":
         cityscapes_root="cityscapes"
     )
 
-    x, y = dataset[0]
-    print(x.shape, y.shape) ## torch.Size([1, 196, 1152]) torch.Size([1, 1024, 2048])
-
     plt.figure()
     plt.imshow(y.permute(1, 2, 0).numpy())
     plt.axis("off")
@@ -110,23 +112,7 @@ if __name__ == "__main__":
 
     features = dataset.features
     ## TODO: ...
-    # Stack features into a 2D array for t-SNE: [num_samples, feature_dim]
-    features_flat = torch.cat([f.flatten() for f in dataset.features], dim=0).view(len(dataset.features), -1)
-    # Optionally, get a simple label for coloring (e.g., mean of target mask)
-    labels = [y.numpy().mean() for _, y in dataset]
-
-    print("Running t-SNE...")
-    tsne = TSNE(n_components=2, perplexity=30, random_state=42)
-    reduced = tsne.fit_transform(features_flat)
-
-    plt.figure(figsize=(8, 6))
-    scatter = plt.scatter(reduced[:, 0], reduced[:, 1], c=labels, cmap="viridis", s=10)
-    plt.colorbar(scatter, label="Mean target value")
-    plt.title("t-SNE of Features")
-    plt.xlabel("t-SNE 1")
-    plt.ylabel("t-SNE 2")
-    plt.tight_layout()
-    plt.show()
+    
 
     ## ----
     tsne = TSNE(n_components=2, perplexity=30, random_state=42)

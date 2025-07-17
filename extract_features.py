@@ -197,20 +197,47 @@ class SegImagesWithLabels(Dataset):
         y should be a tensor of shape (..., 1000);
         first n_classes are class indices, rest is not useful
         """
+        y_map = y_map.long().squeeze(0)
+        
+        mask = (y_map != 255)
+        if mask.sum() == 0:
+            return torch.full((self.max_classes,), 0, dtype=torch.long)  # fallback to class 0 if all unlabeled
+        
+        ids, counts = torch.unique(y_map[mask], return_counts=True)
+        
+        label_id = int(ids[counts.argmax()])
         label_id = self.get_label_id(y_map)
         y = torch.full((self.max_classes,), 0, dtype=torch.long)
         y[label_id] = 1  # one-hot for the class
 
         return y
 
-    def get_label_id(self, y_map):
-        y_map = y_map.long().squeeze(0)
-        mask = (y_map != 255)
-        if mask.sum() == 0:
-            return torch.full((self.max_classes,), 0, dtype=torch.long)  # fallback to class 0 if all unlabeled
-        ids, counts = torch.unique(y_map[mask], return_counts=True)
-        
-        return int(ids[counts.argmax()])
+    def get_all_cls_ids(self):
+        """
+        Returns a list of dominant class_id for each sample in the dataset.
+        For 'semantic' target_type, dominant class is the most frequent label (excluding 255).
+        For 'instance' target_type, uses get_label_id logic.
+        """
+        dominant_ids = []
+        for idx in range(len(self.dataset)):
+            _, y_map = self.dataset[idx]
+            y_map = self.trgt_transform(y_map)
+            if not torch.is_tensor(y_map):
+                y_map = T.ToTensor()(y_map)
+            y_map = y_map.long().squeeze(0)
+            mask = (y_map != 255)
+            if mask.sum() == 0:
+                dominant_ids.append(0)
+                continue
+            if self.dataset.target_type == "semantic":
+                ids, counts = torch.unique(y_map[mask], return_counts=True)
+                dominant_id = int(ids[counts.argmax()])
+            else:
+                # For 'instance', use get_label_id logic
+                ids, counts = torch.unique(y_map[mask], return_counts=True)
+                dominant_id = int(ids[counts.argmax()])
+            dominant_ids.append(dominant_id)
+        return dominant_ids
 
 
 def extract_features(
