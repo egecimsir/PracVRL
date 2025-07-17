@@ -129,7 +129,7 @@ class DDTWrapper:
 
 class SegImagesWithLabels(Dataset):
     """
-    Wrap datasets so that, returns (img, y) instead of (img, (y_sem, y_ins));
+    Wrap datasets so that, returns (img, y) instead of (img, y_map);
     to be fed into DDT.forward(x, t, y)
     """
     def __init__(self, split: str = "train", transform=None, trgt_transform=None, trgt_type: str = "semantic"):
@@ -197,17 +197,20 @@ class SegImagesWithLabels(Dataset):
         y should be a tensor of shape (..., 1000);
         first n_classes are class indices, rest is not useful
         """
+        label_id = self.get_label_id(y_map)
+        y = torch.full((self.max_classes,), 0, dtype=torch.long)
+        y[label_id] = 1  # one-hot for the class
+
+        return y
+
+    def get_label_id(self, y_map):
         y_map = y_map.long().squeeze(0)
         mask = (y_map != 255)
         if mask.sum() == 0:
             return torch.full((self.max_classes,), 0, dtype=torch.long)  # fallback to class 0 if all unlabeled
         ids, counts = torch.unique(y_map[mask], return_counts=True)
-        label_id = int(ids[counts.argmax()])
-
-        y = torch.full((self.max_classes,), 0, dtype=torch.long)
-        y[label_id] = 1  # one-hot for the class
-
-        return y
+        
+        return int(ids[counts.argmax()])
 
 
 def extract_features(
@@ -290,6 +293,7 @@ if __name__ == "__main__":
         ckpt_path=CKPT_PATH,
         device=device
     )
+
     if device == "cuda" and torch.cuda.device_count() > 1:
         ## Fully sharded data parallel
         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -361,6 +365,4 @@ if __name__ == "__main__":
 
             else:
                 print("Folder already exits!")
-
-
     print("Done!")

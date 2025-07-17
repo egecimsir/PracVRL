@@ -8,9 +8,9 @@ from torch.utils.data import Dataset
 from torchvision.datasets import Cityscapes
 from extract_features import SegImagesWithLabels
 
+
 FEAT_ROOT = "cityscapes_features"
 TRGT_ROOT = "cityscapes"
-
 
 
 class FeatureSegmentationDataset(Dataset):
@@ -40,7 +40,7 @@ class FeatureSegmentationDataset(Dataset):
         self.feature_files = sorted([
             os.path.join(self.features_dir, f) for f in os.listdir(self.features_dir) if f.endswith(".pt")
         ])
-
+        ## Features
         loaded_features = []
         for fp in self.feature_files:
             data = torch.load(fp, map_location="cpu")
@@ -50,24 +50,23 @@ class FeatureSegmentationDataset(Dataset):
                 loaded_features.append(data)
 
         features = torch.cat(loaded_features, dim=0)
-        cityscapes = SegImagesWithLabels(
-            root=cityscapes_root, 
-            split=split, 
-            mode="fine",
-            target_type=trgt_type,
-        )
-        self.idx2label = cityscapes.train_id_to_name
         self.features = [feat.unsqueeze(0) for feat in features]
-        self.targets = [cityscapes[i][-1] for i in range(len(self.features))]
 
-        del features, cityscapes, loaded_features
+        ## Targets
+        cityscapes = SegImagesWithLabels(split=split, trgt_type=trgt_type)
+        self.targets = [self.trgt_transform(cityscapes.dataset[i][-1]) for i in range(len(self))]
+        
+        ## Labels
+        self.label_ids = [cityscapes.get_label_id(y_map) for y_map in self.targets]
+
+        del features, loaded_features, cityscapes
 
     def __len__(self):
         return len(self.features)
 
     def __getitem__(self, idx):
-        feat, y 
-        return self.transform(self.features[idx]), self.trgt_transform(self.targets[idx])
+        feat, y_id, y_map = self.features[idx], self.label_ids[idx], self.targets[idx]
+        return self.transform(feat), (y_id, y_map)
     
 
 
