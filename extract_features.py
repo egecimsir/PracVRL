@@ -204,11 +204,11 @@ class SegImagesWithLabels(Dataset):
         if mask.sum() == 0:
             return torch.full((self.max_classes,), 0, dtype=torch.long)  # fallback to class 0 if all unlabeled
         
+        instance_id = int(ids[counts.argmax()])
         ids, counts = torch.unique(y_map[mask], return_counts=True)
-        label_id = int(ids[counts.argmax()])
-
+        class_id = instance_id // 1000  # Get the class id from the instance id
         y = torch.full((self.max_classes,), 0, dtype=torch.long)
-        y[label_id] = 1  # one-hot for the class
+        y[class_id] = 1  # one-hot for the class
 
         return y
 
