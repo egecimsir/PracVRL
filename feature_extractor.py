@@ -67,6 +67,7 @@ class DDTWrapper:
             ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=True)
 
         self.ddt = load_weights(self.ddt, ckpt).to(self.device).eval()
+        self.vae.precompute = False
         self.vae = self.vae.to(self.device).eval()
 
         ## Create scheduler
