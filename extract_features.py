@@ -2,6 +2,7 @@ import os
 import gc
 import torch
 import torch.nn as nn
+import torchvision.transforms as T
 
 from torch import Tensor
 from torch.utils.data import Dataset, DataLoader
@@ -277,17 +278,89 @@ if __name__ == "__main__":
     CONF_PATH = "configs/repa_improved_ddt_xlen22de6_256.yaml"
     CKPT_PATH = "model.ckpt"
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device {device.upper()}")
 
-    ## Initialize DDT
+
+    gc.collect()
+    torch.cuda.empty_cache()
+    print(f"Device: {device.upper()}")
+
+
     model = DDTWrapper(
         config_path=CONF_PATH,
         ckpt_path=CKPT_PATH,
         device=device
     )
-    model.to_eval()
+    if device == "cuda" and torch.cuda.device_count() > 1:
+        ## Fully sharded data parallel
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-    ## Register hook on encoder output
-    activations = model.register_encoder_hook()
+        model.vae = FSDP(model.vae)
+        model.ddt = FSDP(model.ddt)
+        model.conditioner = FSDP(model.conditioner)
+        model.sampler = FSDP(model.sampler)
+        model.diff_trainer = FSDP(model.diff_trainer)
+        print("Model -> FSDP")
+
+        model.to_eval() 
+
+        for SPLIT in ("val", "test", "train"):
+
+            ## ARGUMENTS
+            TIME_STEPS = [0.95, 0.50]
+            TRGT_TYPE = "semantic"
+            OUTPUT_DIR = os.path.join("cityscapes_features", SPLIT)
+
+            if not os.path.exists(OUTPUT_DIR):
+
+                B_SIZE = 64
+                N_SAMPLES = 5000
+                N_CLASSES = 1000
+                SAVE_EVERY = 5
+                TRAFOS = [
+                    T.Resize(256), 
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                ]
+                TRGT_TRAFOS = [
+                    T.Resize(256), 
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                ]
+
+                ## Preperation
+                os.makedirs(OUTPUT_DIR)
+                gc.collect()
+                torch.cuda.empty_cache()
+
+                dataset = SegImagesWithLabels(
+                    split=SPLIT, 
+                    transform=TRAFOS, 
+                    trgt_transform=TRGT_TRAFOS, 
+                    trgt_type=TRGT_TYPE
+                )
+                dataloader = DataLoader(dataset, batch_size=B_SIZE)
+
+                ## MAIN LOOP
+                for t in TIME_STEPS:
+                    out_path = os.path.join(OUTPUT_DIR, f"timestep_{int(t*100)}")
+                    os.makedirs(out_path, exist_ok=True)
+                    print(f"Saving to: {out_path}")
+
+                    ## Extract whole dataset
+                    extract_features(
+                        model=model,
+                        t_step=t,
+                        loader=dataloader,
+                        output_dir=out_path,
+                        save_every=SAVE_EVERY,
+                        device=device
+                    )
+                    print(f"Extracted for time-step {t} !\n")
+
+                print("Done!")
+
+            else:
+                print("Folder already exits!")
+
 
     print("Done!")
