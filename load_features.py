@@ -29,7 +29,6 @@ def get_label_id(y_map: Tensor):
     return label_id
 
 
-
 class FeatureSegmentationDataset(Dataset):
     """
     Loads extracted features from OUTPUT_DIR and matches them with segmentation maps from Cityscapes.
@@ -79,14 +78,18 @@ class FeatureSegmentationDataset(Dataset):
         self.features = [feat.unsqueeze(0) for feat in features]
 
         ## Targets, Labels
-        cityscapes = SegImagesWithLabels(split=split, trgt_type=trgt_type)
-        self.targets = [self.trgt_transform(cityscapes.dataset[i][-1]) for i in range(len(self))]
+        cityscapes = Cityscapes(root=cityscapes_root,split=split, target_type=trgt_type)
+        self.num_samples = min(len(self.features), len(cityscapes))
+
+        self.targets = [self.trgt_transform(cityscapes[i][-1]) for i in range(len(self))]
         self.label_ids = [get_label_id(self.targets[i]) for i in range(len(self))]
+
+        self.idx2label = {c.train_id: c.name for c in Cityscapes.classes if c.train_id != 255}
 
         del features, loaded_features, cityscapes
 
     def __len__(self):
-        return len(self.features)
+        return self.num_samples
 
     def __getitem__(self, idx):
         feat = self.transform(self.features[idx])
