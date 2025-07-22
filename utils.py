@@ -1,5 +1,23 @@
 import re
+import numpy as np
+import matplotlib.pyplot as plt
 import torch
+from matplotlib import colormaps
+from torch import Tensor
+
+
+
+def overlay_mask(img, seg_mask, title: str = "Overlay", alpha = 0.5):
+    if isinstance(img, Tensor):
+        img = img.permute(1, 2, 0)
+    if isinstance(seg_mask, Tensor):
+        seg_mask = seg_mask.permute(1, 2, 0)
+
+    img, seg_mask = np.asarray(img), np.asarray(seg_mask)
+    cmap = colormaps['jet']
+    colored_mask = cmap(seg_mask / seg_mask.max())[:, :, :3]  # Drop alpha channel
+
+    return (1 - alpha) * img / 255.0 + alpha * colored_mask
 
 
 def load_weights(model, checkpoint, prefix="ema_denoiser."):
