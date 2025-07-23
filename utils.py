@@ -9,8 +9,12 @@ from torch import Tensor
 
 def overlay_mask(img, seg_mask, title: str = "Overlay", alpha = 0.5):
     if isinstance(img, Tensor):
+        if img.ndim == 4:
+            img.squeeze(0)
         img = img.permute(1, 2, 0)
     if isinstance(seg_mask, Tensor):
+        if seg_mask.ndim == 4:
+            seg_mask.squeeze(0)
         seg_mask = seg_mask.permute(1, 2, 0)
 
     img, seg_mask = np.asarray(img), np.asarray(seg_mask)
