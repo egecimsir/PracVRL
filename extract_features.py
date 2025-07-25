@@ -214,8 +214,8 @@ class SegImagesWithLabels(Dataset):
 
     
 def extract_features(
-        model: DDTWrapper, 
-        t_step: int, 
+        model: DDTWrapper,
+        t_step: int,
         loader: DataLoader,
         output_dir: str,
         save_every: int = 10,
@@ -223,7 +223,7 @@ def extract_features(
     ):
     print(f"Extracting features using {device.upper()}")
     os.makedirs(output_dir, exist_ok=True)
-    
+
     file_counter = 0
 
     ddt = model.ddt
@@ -235,9 +235,9 @@ def extract_features(
     s0 = scheduler.sigma(t0).view(-1,1,1,1).to(device)
 
     activations = model.register_encoder_hook([])
-    for _, (x, y) in enumerate(tqdm(loader, 
-                    desc="Extracting Features", 
-                    total=len(loader.dataset) // loader.batch_size, 
+    for i, (x, y) in enumerate(tqdm(loader,
+                    desc="Extracting Features",
+                    total=len(loader.dataset) // loader.batch_size,
                     leave=True)
         ):
         x = x.to(device)
@@ -254,25 +254,28 @@ def extract_features(
                 t=torch.full((z.shape[0],), t_step, device=device, dtype=torch.float32),
                 y=y_idx
             )
-        
+
             del z, zt, noise
             torch.cuda.empty_cache()
 
         if len(activations) >= save_every:
             ## Save every act in activations list and empty list
-            act_chunk = torch.cat([act.cpu() for act in activations[:save_every]], dim=0)
+            # Flatten the activations before saving
+            act_chunk = torch.cat([act.mean(dim=1).cpu().view(act.size(0), -1) for act in activations[:save_every]], dim=0)
             save_path = os.path.join(output_dir, f"features_{file_counter:05d}.pt")
             torch.save(act_chunk, save_path)
 
             ## delete items
             activations[:] = activations[save_every:]
             file_counter += 1
-    
+
     ## Save any remaining activations
     if len(activations) > 0:
+        # Flatten the remaining activations before saving
+        act_chunk = torch.cat([act.mean(dim=1).cpu().view(act.size(0), -1) for act in activations], dim=0)
         save_path = os.path.join(output_dir, f"features_{file_counter:05d}.pt")
-        torch.save(activations, save_path)
-    
+        torch.save(act_chunk, save_path)
+
     print("Extracted!")
 
 
