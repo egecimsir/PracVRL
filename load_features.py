@@ -40,7 +40,7 @@ class FeatureSegmentationDataset(Dataset):
             timestep: float = 0.95,
             features_root: str = FEAT_ROOT,
             cityscapes_root: str = TRGT_ROOT, 
-            trgt_type="instance", 
+            trgt_type="semantic", 
             transform=None, 
             trgt_transform=None, 
         ):

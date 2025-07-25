@@ -8,6 +8,30 @@ from torchvision.transforms import transforms as T
 from PIL import Image
 
 
+TRAIN_IDS = {
+     0: 'road',
+     1: 'sidewalk',
+     2: 'building',
+     3: 'wall',
+     4: 'fence',
+     5: 'pole',
+     6: 'traffic light',
+     7: 'traffic sign',
+     8: 'vegetation',
+     9: 'terrain',
+    10: 'sky',
+    11: 'person',
+    12: 'rider',
+    13: 'car',
+    14: 'truck',
+    15: 'bus',
+    16: 'train',
+    17: 'motorcycle',
+    18: 'bicycle',
+    19: 'unlabeled'
+}
+
+
 def map_labels_to_trainIds(label_tensor, mapping):
     # Vectorized mapping for efficiency
     out = label_tensor.clone()
@@ -27,6 +51,18 @@ def get_class_frequency(label_tensor, num_classes=19, ignore_index=19):
         return torch.zeros(num_classes)
     
     return counts / total_valid
+
+
+def get_most_frequent_trainId(label_tensor, num_classes=19, ignore_index=19):
+    # Map label IDs to trainIds first
+    mapped = map_labels_to_trainIds(label_tensor, CityscapesDataset.label2trainId)
+    valid_mask = mapped != ignore_index
+    valid_labels = mapped[valid_mask].flatten()
+    if valid_labels.numel() == 0:
+        return None  # or a default value, e.g., -1
+    counts = torch.bincount(valid_labels, minlength=num_classes).float()
+    most_freq_trainId = counts.argmax().item()
+    return most_freq_trainId
 
 
 
