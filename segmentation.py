@@ -14,7 +14,7 @@ from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from PIL import Image
 from tqdm import tqdm
 
-from datasets import FeatureDataset, PatchedFeatureDataset
+from myDatasets import FeatureDataset, PatchedFeatureDataset
 from decode_heads import SegmentationHead, PatchedSegmentationHead
 
 
