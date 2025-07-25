@@ -15,7 +15,7 @@ class LinearClassifier(nn.Module):
         return self.layers(x)
 
 
-class SegmentationHead(nn.Module):
+class PatchedSegmentationHead(nn.Module):
     def __init__(self, in_dim=1152, n_class=19, patch_size=16, out_size=224):
         super().__init__()
         self.in_dim = in_dim

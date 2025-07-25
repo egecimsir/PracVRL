@@ -99,11 +99,18 @@ class DDTWrapper:
         def hook_fn(layer: DDTBlock, input: Tensor, output: Tensor):
             activations.append(output.detach().cpu())    
         
+        # Handle FSDP wrapped models
+        ddt_model = self.ddt
+        if hasattr(ddt_model, '_fsdp_wrapped_module'):
+            ddt_model = ddt_model._fsdp_wrapped_module
+        elif hasattr(ddt_model, 'module'):
+            ddt_model = ddt_model.module
+        
         ## Register hooks to target layer
-        for n, block in self.ddt.blocks.named_children():  ## 0-27
-            if n == str(self.num_encoder_blocks-1):
-                block.register_forward_hook(hook_fn)
-                print(f"Hook registered for layer: ddt.blocks.{n}")
+        target_block_idx = self.num_encoder_blocks - 1
+        target_block = ddt_model.blocks[target_block_idx]
+        target_block.register_forward_hook(hook_fn)
+        print(f"Hook registered for layer: ddt.blocks.{target_block_idx}")
 
         return activations
 
@@ -230,11 +237,19 @@ def extract_features(
     vae = model.vae
     scheduler = model.scheduler
 
+    ## Register hook
+    layer = ddt.blocks[21]
+    
+    activations = []
+    def frwd_hook(layer, x, out):
+        activations.append(out.detach().cpu())
+
+    layer.register_forward_hook(frwd_hook)
+
     t0 = torch.tensor([t_step], device=device)
     a0 = scheduler.alpha(t0).view(-1,1,1,1).to(device)
     s0 = scheduler.sigma(t0).view(-1,1,1,1).to(device)
 
-    activations = model.register_encoder_hook([])
     for i, (x, y) in enumerate(tqdm(loader,
                     desc="Extracting Features",
                     total=len(loader.dataset) // loader.batch_size,

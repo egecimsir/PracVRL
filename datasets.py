@@ -146,6 +146,73 @@ class CityscapesDataset(Dataset):
         return w_embed
 
 
+
+class FeatureDataset(Dataset):
+    def __init__(self, feat_dir, mask_dir, split, timestep: float, feat_transform=None):
+        assert 0.0 <= timestep <= 1.0
+        self.feat_dir = os.path.join(feat_dir, split, f"timestep_{int(timestep*100)}")
+        self.mask_dir = os.path.join(mask_dir, "gtFine", split)
+        self.split = split
+        self.timestep = timestep
+
+        ## Get features as tensors
+        feature_paths = []
+        for pt_file in os.listdir(self.feat_dir):
+            path = os.path.join(self.feat_dir, pt_file)
+            feature_paths.append(path)
+
+        features = []
+        for path in feature_paths:
+            batch = torch.load(path)
+            features.append(batch)
+
+        self.features = torch.cat(features, dim=0)
+        del features
+
+        ## Get seg_mask paths
+        mask_paths = []
+        for city in os.listdir(self.mask_dir):
+            city_path = os.path.join(self.mask_dir, city)
+            for fpath in os.listdir(city_path):
+                if "labelIds" in fpath:
+                    lbl_path = os.path.join(city_path, fpath)
+                    mask_paths.append(lbl_path)
+
+        mask_paths = sorted(mask_paths)
+
+        assert len(mask_paths) == len(self.features), f"Mismatched files! features={len(self.features)} | masks={len(mask_paths)}"
+
+        self.mask_paths = mask_paths
+
+        ## Transforms
+        self.feat_transform = feat_transform
+        self.mask_transform = T.Compose([
+            T.PILToTensor(),                                        # (1, H, W)
+            T.Lambda(lambda x: x.squeeze(0).long()),                # (H, W)
+            T.Lambda(lambda x: map_labels_to_trainIds(x, CityscapesDataset.label2trainId)),  # (H, W)
+            T.Lambda(lambda x: x.unsqueeze(0)),                     # (1, H, W)
+            T.Resize((224, 224), interpolation=T.InterpolationMode.NEAREST),
+            T.Lambda(lambda x: x.squeeze(0))                        # (224, 224)
+        ])
+
+
+    def __len__(self):
+        return len(self.features)
+
+
+    def __getitem__(self, idx):
+        feat = self.features[idx]
+        mask = Image.open(self.mask_paths[idx])
+
+        if self.feat_transform is not None:
+            feat = self.feat_transform(feat)
+
+        # Apply the modified mask_transform
+        mask = self.mask_transform(mask)
+
+        return feat, mask
+
+
 if __name__ == "__main__":
 
     dataset = CityscapesDataset(root_dir='cityscapes', split='train')
