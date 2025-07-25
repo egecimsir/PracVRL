@@ -219,8 +219,8 @@ class SegImagesWithLabels(Dataset):
 
         return y
 
-    
-def extract_features(
+
+def extract_features_1152(
         model: DDTWrapper,
         t_step: int,
         loader: DataLoader,
@@ -237,28 +237,21 @@ def extract_features(
     vae = model.vae
     scheduler = model.scheduler
 
-    ## Register hook
-    layer = ddt.blocks[21]
-    
-    activations = []
-    def frwd_hook(layer, x, out):
-        activations.append(out.detach().cpu())
-
-    layer.register_forward_hook(frwd_hook)
-
     t0 = torch.tensor([t_step], device=device)
     a0 = scheduler.alpha(t0).view(-1,1,1,1).to(device)
     s0 = scheduler.sigma(t0).view(-1,1,1,1).to(device)
 
-    for i, (x, y) in enumerate(tqdm(loader,
-                    desc="Extracting Features",
-                    total=len(loader.dataset) // loader.batch_size,
-                    leave=True)
-        ):
-        x = x.to(device)
-        y = y.to(device)
+    activations = model.register_encoder_hook([])
+    # Wrap data loading and model inference in torch.no_grad()
+    with torch.no_grad():
+        for i, (x, y) in enumerate(tqdm(loader,
+                        desc="Extracting Features",
+                        total=len(loader.dataset) // loader.batch_size,
+                        leave=True)
+            ):
+            x = x.to(device)
+            y = y.to(device)
 
-        with torch.no_grad():
             z = vae.encode(x)
             noise = torch.randn_like(z)
             zt = a0 * z + s0 * noise
@@ -273,33 +266,183 @@ def extract_features(
             del z, zt, noise
             torch.cuda.empty_cache()
 
-        if len(activations) >= save_every:
-            ## Save every act in activations list and empty list
-            # Flatten the activations before saving
-            act_chunk = torch.cat([act.mean(dim=1).cpu().view(act.size(0), -1) for act in activations[:save_every]], dim=0)
+            if len(activations) >= save_every:
+                ## Save every act in activations list and empty list
+                # Concatenate the activations along the batch dimension (dim 0)
+                act_chunk = torch.cat(activations[:save_every], dim=0).cpu()
+                save_path = os.path.join(output_dir, f"features_{file_counter:05d}.pt")
+                torch.save(act_chunk, save_path)
+
+                ## delete items
+                activations[:] = activations[save_every:]
+                file_counter += 1
+
+        ## Save any remaining activations
+        if len(activations) > 0:
+            # Concatenate the remaining activations along the batch dimension (dim 0)
+            act_chunk = torch.cat(activations, dim=0).cpu()
             save_path = os.path.join(output_dir, f"features_{file_counter:05d}.pt")
             torch.save(act_chunk, save_path)
-
-            ## delete items
-            activations[:] = activations[save_every:]
-            file_counter += 1
-
-    ## Save any remaining activations
-    if len(activations) > 0:
-        # Flatten the remaining activations before saving
-        act_chunk = torch.cat([act.mean(dim=1).cpu().view(act.size(0), -1) for act in activations], dim=0)
-        save_path = os.path.join(output_dir, f"features_{file_counter:05d}.pt")
-        torch.save(act_chunk, save_path)
 
     print("Extracted!")
 
 
+def extract_features_196_1152(
+        model: DDTWrapper,
+        t_step: int,
+        loader: DataLoader,
+        output_dir: str,
+        save_every: int = 10,
+        device: str = "cuda",
+    ):
+    print(f"Extracting features using {device.upper()}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    file_counter = 0
+
+    ddt = model.ddt
+    vae = model.vae
+    scheduler = model.scheduler
+
+    t0 = torch.tensor([t_step], device=device)
+    a0 = scheduler.alpha(t0).view(-1,1,1,1).to(device)
+    s0 = scheduler.sigma(t0).view(-1,1,1,1).to(device)
+
+    activations = model.register_encoder_hook([])
+    # Wrap data loading and model inference in torch.no_grad()
+    with torch.no_grad():
+        for i, (x, y) in enumerate(tqdm(loader,
+                        desc="Extracting Features",
+                        total=len(loader.dataset) // loader.batch_size,
+                        leave=True)
+            ):
+            x = x.to(device)
+            y = y.to(device)
+
+            z = vae.encode(x)
+            noise = torch.randn_like(z)
+            zt = a0 * z + s0 * noise
+            y_idx = y.argmax(dim=1)
+
+            _ = ddt(
+                x=zt,
+                t=torch.full((z.shape[0],), t_step, device=device, dtype=torch.float32),
+                y=y_idx
+            )
+
+            del z, zt, noise
+            torch.cuda.empty_cache()
+
+            if len(activations) >= save_every:
+                ## Save every act in activations list and empty list
+                # Concatenate the activations along the batch dimension (dim 0)
+                act_chunk = torch.cat(activations[:save_every], dim=0).cpu()
+                save_path = os.path.join(output_dir, f"features_{file_counter:05d}.pt")
+                torch.save(act_chunk, save_path)
+
+                ## delete items
+                activations[:] = activations[save_every:]
+                file_counter += 1
+
+        ## Save any remaining activations
+        if len(activations) > 0:
+            # Concatenate the remaining activations along the batch dimension (dim 0)
+            act_chunk = torch.cat(activations, dim=0).cpu()
+            save_path = os.path.join(output_dir, f"features_{file_counter:05d}.pt")
+            torch.save(act_chunk, save_path)
+
+    print("Extracted!")
+
+
+def extract_cityscapes_features(
+    model,
+    device,
+    data_dir,
+    patched = True,
+    output_dir_base="cityscapes_features_patched",
+    time_steps=[0.95, 0.50],
+    target_type="semantic",
+    splits=("test", "train", "val"),
+    batch_size=64,
+    save_every=5,
+):
+    """
+    Extracts patch-based features from Cityscapes images and saves them.
+
+    Args:
+        model: Feature extractor model.
+        device: "cuda" or "cpu".
+        data_dir: Path to Cityscapes dataset.
+        output_dir_base: Base directory to store extracted features.
+        time_steps: List of diffusion or noise timesteps (e.g., [0.95]).
+        target_type: Type of target (e.g., "semantic", unused here but retained).
+        splits: Dataset splits to process ("train", "val", "test").
+        batch_size: Batch size for dataloader.
+        save_every: Save frequency in batches.
+        image_transforms: Optional image transforms.
+        target_transforms: Optional target transforms.
+    """
+
+    if device != "cuda":
+        print("Device is not CUDA. Aborting feature extraction.")
+        return
+
+    for split in splits:
+        output_dir = os.path.join(output_dir_base, split)
+        os.makedirs(output_dir, exist_ok=True)
+
+        print(f"\n[INFO] Extracting features for split: {split}")
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        dataset = CityscapesDataset(
+            root_dir=data_dir,
+            split=split,
+
+        )
+        dataloader = DataLoader(dataset, batch_size=batch_size)
+
+        for t in time_steps:
+            out_path = os.path.join(output_dir, f"timestep_{int(t * 100)}")
+            os.makedirs(out_path, exist_ok=True)
+            print(f"[INFO] Saving features to: {out_path}")
+
+            if patched:
+                extract_features_196_1152(
+                    model=model,
+                    t_step=t,
+                    loader=dataloader,
+                    output_dir=out_path,
+                    save_every=save_every,
+                    device=device
+                )
+            else:
+                extract_features_1152(
+                    model=model,
+                    t_step=t,
+                    loader=dataloader,
+                    output_dir=out_path,
+                    save_every=save_every,
+                    device=device
+                )
+
+            print(f"[✓] Done extracting for timestep {t}\n")
+
+    print("[✓] All extractions complete.")
+
+
 
 if __name__ == "__main__":
+    DATA_DIR = "cityscapes"
+    FEAT_DIR = "cityscape_features_avg"
+    P_FEAT_DIR = "cityscape_features_patched"
+
     CONF_PATH = "configs/repa_improved_ddt_xlen22de6_256.yaml"
     CKPT_PATH = "model.ckpt"
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    TIME_STEPS = (0.95, 0.50)
+    SPLITS = ("train", "test", "val")
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -325,62 +468,24 @@ if __name__ == "__main__":
 
         model.to_eval() 
 
-        for SPLIT in ("val", "test", "train"):
+        extract_cityscapes_features(
+            model=model,
+            device=device,
+            data_dir=DATA_DIR,
+            patched = False,
+            output_dir_base=FEAT_DIR,
+            time_steps=TIME_STEPS,
+            splits=SPLITS,
+        )
 
-            ## ARGUMENTS
-            TIME_STEPS = [0.95, 0.50]
-            TRGT_TYPE = "semantic"
-            OUTPUT_DIR = os.path.join("cityscapes_features", SPLIT)
+        extract_cityscapes_features(
+            model=model,
+            device=device,
+            data_dir=DATA_DIR,
+            patched = True,
+            output_dir_base=P_FEAT_DIR,
+            time_steps=TIME_STEPS,
+            splits=SPLITS,
+        )
 
-            if not os.path.exists(OUTPUT_DIR):
-
-                B_SIZE = 64
-                N_SAMPLES = 5000
-                N_CLASSES = 1000
-                SAVE_EVERY = 5
-                TRAFOS = [
-                    T.Resize(256), 
-                    T.CenterCrop(224),
-                    T.ToTensor(),
-                ]
-                TRGT_TRAFOS = [
-                    T.Resize(256), 
-                    T.CenterCrop(224),
-                    T.ToTensor(),
-                ]
-
-                ## Preperation
-                os.makedirs(OUTPUT_DIR)
-                gc.collect()
-                torch.cuda.empty_cache()
-
-                dataset = SegImagesWithLabels(
-                    split=SPLIT, 
-                    transform=TRAFOS, 
-                    trgt_transform=TRGT_TRAFOS, 
-                    trgt_type=TRGT_TYPE
-                )
-                dataloader = DataLoader(dataset, batch_size=B_SIZE)
-
-                ## MAIN LOOP
-                for t in TIME_STEPS:
-                    out_path = os.path.join(OUTPUT_DIR, f"timestep_{int(t*100)}")
-                    os.makedirs(out_path, exist_ok=True)
-                    print(f"Saving to: {out_path}")
-
-                    ## Extract whole dataset
-                    extract_features(
-                        model=model,
-                        t_step=t,
-                        loader=dataloader,
-                        output_dir=out_path,
-                        save_every=SAVE_EVERY,
-                        device=device
-                    )
-                    print(f"Extracted for time-step {t} !\n")
-
-                print("Done!")
-
-            else:
-                print("Folder already exits!")
-    print("Done!")
+    print("DONE!")

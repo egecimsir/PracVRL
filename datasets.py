@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.transforms import transforms as T
+from torchvision.transforms import InterpolationMode
 from PIL import Image
 
 
@@ -115,7 +116,7 @@ class CityscapesDataset(Dataset):
             T.ToTensor(),  ## Converts to [0, 1], shape (3, H, W)
         ])
         self.label_transform = T.Compose([
-            T.Resize(image_size, interpolation=Image.NEAREST),
+            T.Resize(image_size, interpolation=InterpolationMode.NEAREST),
             T.PILToTensor(),                         ## Returns shape (1, H, W), dtype: uint8
             T.Lambda(lambda x: x.squeeze(0).long())  ## Convert to (H, W), dtype: long
         ])
@@ -186,13 +187,14 @@ class FeatureDataset(Dataset):
 
         ## Transforms
         self.feat_transform = feat_transform
+        # Modified mask_transform sequence
         self.mask_transform = T.Compose([
-            T.PILToTensor(),                                        # (1, H, W)
-            T.Lambda(lambda x: x.squeeze(0).long()),                # (H, W)
-            T.Lambda(lambda x: map_labels_to_trainIds(x, CityscapesDataset.label2trainId)),  # (H, W)
-            T.Lambda(lambda x: x.unsqueeze(0)),                     # (1, H, W)
-            T.Resize((224, 224), interpolation=T.InterpolationMode.NEAREST),
-            T.Lambda(lambda x: x.squeeze(0))                        # (224, 224)
+            T.PILToTensor(),                                        # Convert PIL Image to tensor (1, H, W)
+            T.Resize((224, 224), interpolation=T.InterpolationMode.NEAREST), # Resize first while still (1, H, W)
+            T.Lambda(lambda x: x.squeeze(0).long()),                # Remove channel dim and convert to long (H, W)
+            T.Lambda(lambda x: map_labels_to_trainIds(x, CityscapesDataset.label2trainId)), # Map labels (0-18, 19 for ignore)
+            # Set ignore_index (19) to -1 for CrossEntropyLoss
+            T.Lambda(lambda x: torch.where(x == 19, torch.tensor(-1, dtype=torch.long), x)),
         ])
 
 
@@ -211,6 +213,72 @@ class FeatureDataset(Dataset):
         mask = self.mask_transform(mask)
 
         return feat, mask
+
+
+class PatchedFeatureDataset(Dataset):
+    def __init__(self, feat_dir, mask_dir, split, timestep: float):
+        assert 0.0 <= timestep <= 1.0
+        self.feat_dir = os.path.join(feat_dir, split, f"timestep_{int(timestep*100)}")
+        self.mask_dir = os.path.join(mask_dir, "gtFine", split)
+        self.split = split
+        self.timestep = timestep
+
+        ## Get features as tensors
+        feature_paths = []
+        for pt_file in os.listdir(self.feat_dir):
+            path = os.path.join(self.feat_dir, pt_file)
+            feature_paths.append(path)
+
+        features = []
+        for path in feature_paths:
+            batch = torch.load(path)
+            features.append(batch)
+
+        self.features = torch.cat(features, dim=0)
+        del features
+
+        ## Get seg_mask paths
+        mask_paths = []
+        for city in os.listdir(self.mask_dir):
+            city_path = os.path.join(self.mask_dir, city)
+            for fpath in os.listdir(city_path):
+                if "labelIds" in fpath:
+                    lbl_path = os.path.join(city_path, fpath)
+                    mask_paths.append(lbl_path)
+
+        mask_paths = sorted(mask_paths)
+
+        assert len(mask_paths) == len(self.features), f"Mismatched files! features={len(self.features)} | masks={len(mask_paths)}"
+
+        self.mask_paths = mask_paths
+
+        ## Transforms
+        self.feat_transform = T.Compose([
+            T.Lambda(lambda x: x.view(196, 1152))
+        ])
+
+        # Modified mask_transform sequence
+        self.mask_transform = T.Compose([
+            T.PILToTensor(),                                        # Convert PIL Image to tensor (1, H, W)
+            T.Resize((224, 224), interpolation=T.InterpolationMode.NEAREST), # Resize first while still (1, H, W)
+            T.Lambda(lambda x: x.squeeze(0).long()),                # Remove channel dim and convert to long (H, W)
+            T.Lambda(lambda x: map_labels_to_trainIds(x, CityscapesDataset.label2trainId)), # Map labels (0-18, 19 for ignore)
+            # Set ignore_index (19) to -1 for CrossEntropyLoss
+            T.Lambda(lambda x: torch.where(x == 19, torch.tensor(-1, dtype=torch.long), x)),
+        ])
+
+
+    def __len__(self):
+        return len(self.features)
+
+
+    def __getitem__(self, idx):
+        feat = self.feat_transform(self.features[idx])
+        mask = self.mask_transform(Image.open(self.mask_paths[idx]))
+
+        return feat, mask
+
+
 
 
 if __name__ == "__main__":
